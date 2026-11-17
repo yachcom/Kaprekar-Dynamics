@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 Kaprekar Dynamics — Streamlit app for the paper.
-Deployed via GitHub → Streamlit Cloud / Render / HAL / Zenodo.
+Deployed via GitHub → Streamlit Cloud / Render.
 """
 
 import streamlit as st
@@ -24,7 +24,6 @@ st.set_page_config(
 
 st.markdown("""
 <style>
-    /* Horizontal scroll for wide tables on mobile */
     .kp-wrap {
         overflow-x: auto;
         -webkit-overflow-scrolling: touch;
@@ -53,8 +52,12 @@ st.markdown("""
     
     /* Colors for trajectory states */
     .kp-table .anomaly { background: #ffe0e0; font-weight: 600; } /* Red: S has 18 */
-    .kp-table .cause   { background: #fff3cd; }                  /* Yellow: z>0, causes anomaly in next step */
+    .kp-table .cause   { background: #fff3cd; }                  /* Yellow: z>0 */
     .kp-table .good    { background: #e6f4ea; }                  /* Green: cycle */
+    
+    /* Matrix colors */
+    .matrix-green { color: #2e7d32; font-weight: bold; font-size: 16px; }
+    .matrix-red   { color: #c62828; font-weight: bold; font-size: 16px; }
     
     .kp-table caption {
         caption-side: top;
@@ -72,7 +75,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ============================================================
-# CORE
+# CORE MATH FUNCTIONS
 # ============================================================
 
 def K(n, k):
@@ -125,7 +128,6 @@ def trajectory(n, k, max_steps=5000):
     return path, len(path) - 1, [path[-1]]
 
 def S_of_raw(n, k):
-    """Raw symmetric sums, WITH 18 (Theorem 3). No normalization."""
     a = digits_of(n, k)
     m = k // 2
     if k % 2 == 0:
@@ -159,7 +161,6 @@ def fmt(n, k):
     return str(int(n)).zfill(k)
 
 def check_sp3_pattern(sp3, k):
-    """Proposition 1: SP3 = (p, q, …, q, p−2)."""
     m = k // 2
     if m < 2:
         return True
@@ -170,8 +171,53 @@ def check_sp3_pattern(sp3, k):
             return False
     return True
 
+def multinomial(digits):
+    cnt = defaultdict(int)
+    for d in digits:
+        cnt[int(d)] += 1
+    total = factorial(sum(cnt.values()))
+    for c in cnt.values():
+        total //= factorial(c)
+    return total
+
 # ============================================================
-# HTML TABLES
+# CACHED ENUMERATION FUNCTIONS
+# ============================================================
+
+@st.cache_data(show_spinner="Перебираю классы эквивалентности…")
+def enumerate_classes_cached(k):
+    """dict: canon_cycle_tuple -> {'cycle': [...], 'count': classes, 'numbers': k-perms}."""
+    cycles = {}
+    for combo in combinations_with_replacement(range(10), k):
+        if len(set(combo)) == 1:
+            continue
+        n = int(''.join(str(x) for x in sorted(combo, reverse=True)))
+        path, ci, cyc = trajectory(n, k)
+        canon = tuple(sorted(cyc))[0]
+        if canon not in cycles:
+            cycles[canon] = {'cycle': list(cyc), 'count': 0, 'numbers': 0}
+        cycles[canon]['count'] += 1
+        cycles[canon]['numbers'] += multinomial(combo)
+    
+    # Trivial zero (all-same digits → K = 0)
+    zero = tuple([0] * k)
+    cycles[zero] = {'cycle': [0], 'count': 10, 'numbers': 10}
+    return cycles
+
+@st.cache_data(show_spinner=False)
+def d_basins_cached(k):
+    """Basins in d-space: number of d-vectors leading to each attractor."""
+    m = k // 2
+    result = defaultdict(int)
+    for d in combinations_with_replacement(range(9, -1, -1), m):
+        kv = encode_K(d, k)
+        _, _, cyc = trajectory(kv, k)
+        canon = tuple(sorted(cyc))[0]
+        result[canon] += 1
+    return dict(result)
+
+# ============================================================
+# HTML TABLE BUILDERS
 # ============================================================
 
 def html_table(headers, rows, caption=None):
@@ -209,7 +255,7 @@ def trajectory_table(path, k, ci, cyc):
         
         # Coloring logic
         if 18 in s_raw or not sp3_ok:
-            row_class = 'anomaly'   # Red: The anomaly itself
+            row_class = 'anomaly'   # Red: The anomaly itself (S has 18)
         elif z > 0:
             row_class = 'cause'     # Yellow: The cause (z>0, leading to anomaly in next step)
         elif t >= ci and len(cyc) > 1:
@@ -240,13 +286,28 @@ def trajectory_table(path, k, ci, cyc):
         })
     return html_table(headers, rows, caption=f"Траектория k={k}")
 
+def antisym_matrix_html(path, k):
+    N = len(path)
+    S_vecs = [S_of_raw(n, k) for n in path]
+    
+    headers = ['Итер \\ Итер'] + [f"{i}" for i in range(N)]
+    rows = []
+    for i in range(N):
+        cells = [f"<b>{i}</b>"]
+        for j in range(N):
+            if S_vecs[i] == S_vecs[j]:
+                cells.append('<span class="matrix-green">✓</span>')
+            else:
+                cells.append('<span class="matrix-red">✗</span>')
+        rows.append(cells)
+    return html_table(headers, rows, caption="Матрица антисимметрии (Теорема 5)")
+
 # ============================================================
-# UI
+# UI INIT
 # ============================================================
 
 st.title("Динамика процедуры Капрекара")
-st.caption("Интерактивная визуализация статьи «Процедура Капрекара: "
-           "линейная структура образа, симметричные суммы и перепись аттракторов»")
+st.caption("Интерактивная визуализация статьи")
 
 tabs = st.tabs([
     "Обзор", "Траектория", "d ↔ K", "S и z, SP3/SP4",
@@ -258,7 +319,6 @@ with tabs[0]:
     st.header("Обзор результатов")
     st.markdown("""
     Этот инструмент визуализирует основные результаты статьи.
-    Каждая вкладка соответствует разделу статьи:
 
     | Вкладка | Что показывает | Раздел статьи |
     |---|---|---|
@@ -269,14 +329,6 @@ with tabs[0]:
     | **Контейнеры** | Разрез слоя d₁=8, d₂=6 | §5 |
     | **Проверка** | Запуск assert-проверок (как verify_kaprekar.py) | прил. B |
     """)
-
-    st.subheader("Размер образа |im K| = C(m+9, 9)")
-    st.caption("Для k=10: из 10¹⁰ входов получается лишь 2002 различных значения K.")
-    size_data = [(k, k // 2, comb(k // 2 + 9, 9)) for k in range(3, 13)]
-    st.dataframe(
-        pd.DataFrame(size_data, columns=['k', 'm = ⌊k/2⌋', '|im K| = C(m+9,9)']),
-        use_container_width=True, hide_index=True,
-    )
 
     st.subheader("Ключевые факты")
     st.markdown("""
@@ -313,45 +365,50 @@ with tabs[1]:
             st.code(f"Неподвижная точка: {fmt(cyc[0], k_input)}")
 
         st.subheader("Траектория")
-        st.caption("Желтым — состояния с z > 0 (причина аномалии). "
-                   "Красным — состояния, где S содержит 18 (следствие аномалии). "
+        st.caption("Желтым — состояния с z > 0 (причина). "
+                   "Красным — состояния, где S содержит 18 (следствие). "
                    "Зелёным — цикл.")
         st.markdown(trajectory_table(path, k_input, ci, cyc), unsafe_allow_html=True)
 
         st.subheader("Антисимметрия: матрица сравнения всех пар (Теорема 5)")
-        st.caption("Теорема 5: разность антисимметрична ⇔ S(X) = S(Y). "
-                   "Зелёные клетки — S совпадают (антисимметрия). "
-                   "Красные — S различаются.")
-        
-        # Full pairwise antisymmetry matrix
-        S_vecs = [S_of_raw(n, k_input) for n in path]
-        N = len(path)
-        M_anti = np.zeros((N, N))
-        for i in range(N):
-            for j in range(N):
-                M_anti[i][j] = 1 if S_vecs[i] == S_vecs[j] else 0
+        st.caption("Сравнение каждой итерации (строки) с каждой (столбцы). "
+                   "Зелёная галочка (✓) — пара антисимметрична (S совпадают). "
+                   "Красный крест (✗) — антисимметрия нарушена (S различаются).")
+        st.markdown(antisym_matrix_html(path, k_input), unsafe_allow_html=True)
 
-        fig_anti = go.Figure(data=go.Heatmap(
-            z=M_anti,
-            x=[str(i) for i in range(N)],
-            y=[str(i) for i in range(N)],
-            colorscale=[[0, '#ff7f7f'], [1, '#7fff7f']], # Red to Green
-            showscale=False,
-            hovertemplate='Итер %{y} vs Итер %{x}<br>Антисимметрия: %{z}<extra></extra>'
-        ))
-        fig_anti.update_layout(
-            xaxis_title="Итерация B",
-            yaxis_title="Итерация A",
-            height=600,
-            yaxis=dict(autorange="reversed"),
-            margin=dict(l=10, r=10, t=30, b=10),
-        )
-        st.plotly_chart(fig_anti, use_container_width=True)
+        st.subheader("Детальный калькулятор разностей")
+        st.caption("Выберите любые две итерации, чтобы увидеть их поразрядную разность Δ.")
+        if len(path) > 1:
+            cc1, cc2 = st.columns(2)
+            with cc1:
+                i_a = st.selectbox("Итерация A:", range(len(path)), index=0, key='iA')
+            with cc2:
+                i_b = st.selectbox("Итерация B:", range(len(path)), index=min(6, len(path) - 1), key='iB')
+            
+            a_n, b_n = path[i_a], path[i_b]
+            a_digits = digits_of(a_n, k_input)
+            b_digits = digits_of(b_n, k_input)
+            diffs = a_digits - b_digits
+            S_a = S_of_raw(a_n, k_input)
+            S_b = S_of_raw(b_n, k_input)
+            
+            st.write(f"**A** ({i_a}): `{fmt(a_n, k_input)}` | **B** ({i_b}): `{fmt(b_n, k_input)}`")
+            st.write(f"S(A) = {S_a}, S(B) = {S_b}")
+            
+            if S_a == S_b:
+                st.success(f"✓ Антисимметрична (S совпадают)")
+            else:
+                st.warning(f"✗ Не антисимметрична (S различаются)")
+                
+            chips = ""
+            for d in diffs:
+                c = '#ffb0b0' if d < 0 else ('#b0e0b0' if d > 0 else '#e6e6e6')
+                chips += f'<span style="display:inline-block;padding:2px 6px;margin:1px;background:{c};border-radius:8px;">{d:+d}</span>'
+            st.markdown(f"**Разность Δ (A − B):** {chips}", unsafe_allow_html=True)
 
-        st.subheader("3D-Динамика / 3D Dynamics (Экспериментально)")
-        st.caption("Седловидная поверхность разностей цифр. "
-                   "Не является частью теоретического аппарата статьи, "
-                   "но помогает увидеть структуру визуально.")
+        st.subheader("3D-Динамика / 3D Dynamics")
+        st.caption("Седловидная поверхность разностей цифр между соседними итерациями. "
+                   "Наглядно показывает «разломы» (швы) при смене z.")
         
         if len(path) > 2:
             Z_diffs = np.array([
@@ -566,22 +623,11 @@ with tabs[4]:
                 'Чисел %': f"{info['numbers']/total_n*100:.2f}",
             })
         st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
-        st.caption(f"Всего классов: {total_c} = C({k_cen}+9,9) = {comb(k_cen+9, 9)}. "
-                   f"d-состояний: {total_d} = C({k_cen//2}+9,9). "
-                   f"Чисел: {total_n:,} = {10**k_cen:,}.")
 
 # ===== TAB 6: КОНТЕЙНЕРЫ =====
 with tabs[5]:
     st.header("Разрез слоя d₁ = 8, d₂ = 6 (контейнер 86__32)")
-    st.markdown("""
-    Контейнер **86__32** означает a₁ = 8, a₂ = 6, a_{k−1} = 3, a_k = 2;
-    по теореме 2 это равносильно d₁ = 8, d₂ = 6 (автоматически z ≤ m−3).
-
-    §5.3 статьи: если удалить из d-графа слой d₁=8, d₂=6, то
-    при k = 6…9 не остаётся циклов длины > 1 (только неподвижные),
-    а при k = 10 выживают ровно два 3-цикла без 86__32.
-    """)
-
+    
     k_cut = st.selectbox("k:", list(range(4, 11)), index=6, key='k_cut')
     col1, col2 = st.columns(2)
     with col1:
@@ -592,7 +638,6 @@ with tabs[5]:
     if st.button("Показать разрез", key='cut_btn'):
         with st.spinner("Перебираю классы и режу слой…"):
             cyc_cut = enumerate_classes_cached(k_cut)
-            
             survived, cut = [], []
             for canon, info in cyc_cut.items():
                 has_layer = any(
@@ -616,9 +661,6 @@ with tabs[5]:
 # ===== TAB 7: ПРОВЕРКА =====
 with tabs[6]:
     st.header("Проверка утверждений")
-    st.caption("Assert-проверки, аналогичные verify_kaprekar.py: известные константы, "
-               "теоремы 1–5, формула E, волокно 24.")
-
     if st.button("Запустить все проверки", type="primary", key='run_verify'):
         with st.spinner("Проверяю…"):
             results = []
@@ -667,14 +709,6 @@ with tabs[6]:
                     assert anti == (base_S == other_S), f"pair {base}, {other}"
             _chk("Теорема 5: антисимметрия ⇔ равны S", c4)
 
-            def c5():
-                for n in (98626311, 65408544, 82108872):
-                    a = digits_of(n, 8)
-                    E = (10 * int(a[0]) + int(a[1])) + (10 * int(a[-2]) + int(a[-1]))
-                    assert E == 100 + 9 * (int(a[0]) - int(a[1])), f"n={n}"
-            _chk("§5.2: E = 100 + 9(a₁−a₂)", c5)
-
-            # Fiber count for (9,8,5,3) k=8
             def c6():
                 cnt = 0
                 for combo in combinations_with_replacement(range(10), 8):
@@ -690,4 +724,4 @@ with tabs[6]:
         n_ok = sum(1 for _, s, _ in results if s == '✅')
         st.metric(f"Пройдено {n_ok}/{len(results)}", "")
 
-# ============================================================
+st.divider()
