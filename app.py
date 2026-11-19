@@ -155,7 +155,7 @@ def SP4(n, k):
     m = k // 2
     if k % 2 == 0:
         return tuple(int(a[m - 1 - i] - a[m + i]) for i in range(m))
-    return tuple(int(a[m - i] - a[m + i]) for i in range(m))
+    return tuple(int(a[m - 1 - i] - a[m + 1 + i]) for i in range(m))
 
 def fmt(n, k):
     return str(int(n)).zfill(k)
@@ -284,7 +284,7 @@ def trajectory_table(path, k, ci, cyc):
                 '✓' if sp3_ok else '✗',
             ]
         })
-    return html_table(headers, rows, caption=f"Траектория k={k}")
+    return html_table(headers, rows, caption=f"Траектория k={k}. z и S относятся к текущему состоянию n_t; столбец Сумма = сумма цифр n_t; E имеет смысл только для n_t из образа K (t >= 1).")
 
 def antisym_matrix_html(path, k):
     N = len(path)
@@ -681,12 +681,12 @@ with tabs[6]:
             _chk("Неподвижные точки (включая 555499994445, z=2)", c1)
 
             def c2():
-                for k in range(3, 11):
+                for k in range(3, 13):
                     m = k // 2
                     vals = {encode_K(d, k)
                             for d in combinations_with_replacement(range(9, -1, -1), m)}
                     assert len(vals) == comb(m + 9, 9), f"k={k}: {len(vals)}"
-            _chk("Теорема 1: |im K| = C(m+9,9) для k=3..10", c2)
+            _chk("Теорема 1: |im K| = C(m+9,9) для k=3..12", c2)
 
             def c3():
                 for k in range(3, 10):
