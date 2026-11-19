@@ -235,7 +235,7 @@ def html_table(headers, rows, caption=None):
 
 def trajectory_table(path, k, ci, cyc):
     headers = ['Итер.', 'Число', 'd', 'z', 'S (сырые)', 'S (корень)',
-               'ΣK', 'E', 'SP2', 'SP3', 'SP3=p..p−2?']
+               'Сумма(n_t)', 'E', 'SP2', 'SP3', 'SP3=p..p−2?']
     rows = []
     for t, n in enumerate(path):
         s_raw = S_of_raw(n, k)
@@ -700,14 +700,39 @@ with tabs[6]:
             _chk("Теорема 4: сумма цифр (k=3..9)", c3)
 
             def c4():
-                k, base = 8, 98626311
-                base_S = S_of_raw(base, k)
-                for other in (65299644, 87426522, 65408544, 83208762):
-                    other_S = S_of_raw(other, k)
-                    diffs = [int(digits_of(base, k)[i]) - int(digits_of(other, k)[i]) for i in range(k)]
-                    anti = all(diffs[i] == -diffs[k - 1 - i] for i in range(k // 2))
-                    assert anti == (base_S == other_S), f"pair {base}, {other}"
-            _chk("Теорема 5: антисимметрия ⇔ равны S", c4)
+                # Theorem 5, exhaustive: all pairs of d-states, k = 3..8
+                for k in range(3, 9):
+                    m = k // 2
+                    states = list(combinations_with_replacement(range(9, -1, -1), m))
+                    S_map, dig_map = {}, {}
+                    for d in states:
+                        kv = encode_K(d, k)
+                        S_map[d] = S_of_raw(kv, k)
+                        dig_map[d] = [int(c) for c in fmt(kv, k)]
+                    for d1 in states:
+                        a1, s1 = dig_map[d1], S_map[d1]
+                        for d2 in states:
+                            a2 = dig_map[d2]
+                            diffs = [a1[i] - a2[i] for i in range(k)]
+                            anti = all(diffs[i] == -diffs[k - 1 - i] for i in range(k // 2))
+                            if k % 2 != 0:
+                                anti = anti and (diffs[k // 2] == 0)
+                            assert anti == (s1 == S_map[d2]), f"k={k} d1={d1} d2={d2}"
+            _chk("Теорема 5: исчерпывающая проверка всех пар d-состояний (k=3..8)", c4)
+            
+            def c5():
+                # Proposition 1: SP4 - SP3 == L^R - L for all d, k = 4..8
+                for k in range(4, 9):
+                    m = k // 2
+                    for d in combinations_with_replacement(range(9, -1, -1), m):
+                        n = encode_K(d, k)
+                        sp3 = SP3(n, k)
+                        sp4 = SP4(n, k)
+                        left = tuple(int(sp4[i] - sp3[i]) for i in range(m))
+                        right = tuple(int(digits_of(n, k)[m - 1 - i] - digits_of(n, k)[i]) for i in range(m))
+                        assert left == right, f"k={k} d={d}"
+            _chk("Предложение 1: SP4 - SP3 = L^R - L (все d, k=4..8)", c5)
+
 
             def c6():
                 cnt = 0
@@ -718,6 +743,37 @@ with tabs[6]:
                         cnt += 1
                 assert cnt == 24, f"fiber={cnt}"
             _chk("Пример 2: |fiber(9,8,5,3)| = 24 при k=8", c6)
+            
+            def c7():
+                # Conjecture 1: every state of every cycle with length > 1 has z = 0
+                for k in range(6, 13):
+                    for d in combinations_with_replacement(range(9, -1, -1), k // 2):
+                        _, _, cyc = trajectory(encode_K(d, k), k)
+                        if len(cyc) > 1:
+                            for x in cyc:
+                                assert z_of(x, k) == 0, f"k={k} state {fmt(x, k)} has z>0"
+
+            def c8():
+                # Theorem 2: digit structure of the image for all d, k = 3..9
+                for k in range(3, 10):
+                    m, eps = k // 2, k % 2
+                    for d in combinations_with_replacement(range(9, -1, -1), m):
+                        z = z_from_d(d)
+                        actual = tuple(int(c) for c in fmt(encode_K(d, k), k))
+                        if z == m:
+                            pred = tuple([0] * k)
+                        elif z == m - 1:
+                            pred = tuple([d[0] - 1] + [9] * (2 * m - 2 + eps) + [10 - d[0]])
+                        else:
+                            pred = tuple(list(d[: m - z - 1]) + [d[m - z - 1] - 1]
+                                         + [9] * (2 * z + eps)
+                                         + [9 - d[j] for j in range(m - z - 1, 0, -1)]
+                                         + [10 - d[0]])
+                        assert pred == actual, f"k={k} d={d}"
+
+            _chk("Гипотеза 1: циклы длины >1 только при z=0 (k=6..12)", c7)
+            _chk("Теорема 2: структура цифр для всех d (k=3..9)", c8)
+
 
         df = pd.DataFrame(results, columns=['Проверка', 'Статус', 'Детали'])
         st.dataframe(df, use_container_width=True, hide_index=True)
