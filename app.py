@@ -774,16 +774,16 @@ with tabs[6]:
             _chk("Гипотеза 1: циклы длины >1 только при z=0 (k=6..12)", c7)
             _chk("Теорема 2: структура цифр для всех d (k=3..9)", c8)
             
-            def c9():
-    for k in range(3, 10):
-        m = k // 2
-        for z in range(m + 1):
-            if z == m:
-                expected_S = [0] * m
-            elif z == m - 1:
-                expected_S = [18] * (m - 1) + [9]
-            else:
-                expected_S = [18] * z + [8] + [9] * (m - z - 2) + [10]
+          def c9():
+            for k in range(3, 10):
+                m = k // 2
+                for z in range(m + 1):
+                    if z == m:
+                    expected_S = [0] * m
+                    elif z == m - 1:
+                    expected_S = [18] * (m - 1) + [9]
+                    else:
+                    expected_S = [18] * z + [8] + [9] * (m - z - 2) + [10]
             
             # Проверяем для всех d с данным z
             for d in combinations_with_replacement(range(9, -1, -1), m):
@@ -793,7 +793,7 @@ with tabs[6]:
                 actual_S = S_of_raw(n, k)
                 assert actual_S == expected_S, f"Ошибка для k={k}, z={z}, d={d}"
 
-_chk("Теорема 3: структура S(z)", c9)
+          _chk("Теорема 3: структура S(z)", c9)
 
 
         df = pd.DataFrame(results, columns=['Проверка', 'Статус', 'Детали'])
