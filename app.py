@@ -869,25 +869,110 @@ with tabs[7]:
         st.dataframe(styler, use_container_width=True)
 
 
+                # ================= ЭКСПОРТ =================
         buf = io.BytesIO()
         try:
+            from openpyxl.styles import PatternFill
+            GREEN = PatternFill(fill_type='solid',
+                                start_color='C6EFCE', end_color='C6EFCE')
+
+            def _paint_yes(writer, sheet, header_col):
+                """Зелёная заливка строк, где в колонке header_col стоит «да»."""
+                ws = writer.book[sheet]
+                headers = [ws.cell(1, c).value for c in range(1, ws.max_column + 1)]
+                col = headers.index(header_col) + 1
+                for r in range(2, ws.max_row + 1):
+                    if ws.cell(r, col).value == 'да':
+                        for c in range(1, ws.max_column + 1):
+                            ws.cell(r, c).fill = GREEN
+
             with pd.ExcelWriter(buf, engine='openpyxl') as w:
                 df_fp.to_excel(w, sheet_name='Fixed points', index=False)
                 df_cy.to_excel(w, sheet_name='Cycles', index=False)
                 df_box.to_excel(w, sheet_name='Containers', index=False)
+                _paint_yes(w, 'Containers', 'В аттракторах')
             st.download_button(
-                "Скачать Excel", buf.getvalue(),
+                f"Скачать Excel (k = {k_exp})", buf.getvalue(),
                 f"kaprekar_summary_k{k_exp}.xlsx",
                 "application/vnd.openxmlformats-officedocument."
                 "spreadsheetml.sheet", key=f'exp_xlsx_{k_exp}')
         except Exception:
-            csv_all = pd.concat([df_fp.assign(sheet='fixed'),
-                                 df_cy.assign(sheet='cycles'),
-                                 df_box.assign(sheet='containers')])
-            st.download_button(
-                "Скачать CSV (openpyxl недоступен)",
-                csv_all.to_csv(index=False).encode('utf-8'),
-                f"kaprekar_summary_k{k_exp}.csv", "text/csv",
-                key=f'exp_csv_{k_exp}')
+            def _csv_bytes(df):
+                return df.to_csv(index=False, sep=';').encode('utf-8-sig')
+            st.download_button("CSV: неподвижные точки", _csv_bytes(df_fp),
+                               f"fixed_points_k{k_exp}.csv", "text/csv",
+                               key=f'exp_csv_fp_{k_exp}')
+            st.download_button("CSV: циклы", _csv_bytes(df_cy),
+                               f"cycles_k{k_exp}.csv", "text/csv",
+                               key=f'exp_csv_cy_{k_exp}')
+            st.download_button("CSV: контейнеры", _csv_bytes(df_box),
+                               f"containers_k{k_exp}.csv", "text/csv",
+                               key=f'exp_csv_box_{k_exp}')
+
+        st.markdown("---")
+        st.subheader("Выгрузка всех k (1–12) в один файл")
+        st.caption("Один Excel: три листа с колонкой «k» — неподвижные точки, "
+                   "циклы, контейнеры (полные списки, не только топ-15). "
+                   "Строки контейнеров из аттракторов подсвечены. Первый запуск "
+                   "требует перебора всех k, включая 10–12 (несколько минут; "
+                   "если k уже загружены, откроется мгновенно).")
+
+        if st.button("Собрать и скачать все k", key='exp_all_btn'):
+            with st.spinner("Перебираю все k (1–12)…"):
+                rows_fp, rows_cy, rows_box = [], [], []
+                for kk in range(1, 13):
+                    cyc_kk = enumerate_classes_cached(kk)
+                    db_kk = d_basins_cached(kk)
+                    boxes_kk = _exp_containers(kk)
+                    att_kk = {fmt(x, kk)[:2] + '__' + fmt(x, kk)[-2:]
+                              for info in cyc_kk.values() for x in info['cycle']}
+                    total_kk = sum(i['count'] for i in cyc_kk.values())
+                    for canon, info in cyc_kk.items():
+                        base = {'k': kk, 'Классов': info['count'],
+                                'd-сост.': db_kk.get(canon, 0),
+                                'Чисел': info['numbers']}
+                        if len(info['cycle']) == 1:
+                            rows_fp.append({**base,
+                                'Неподвижная точка': fmt(info['cycle'][0], kk),
+                                'z': z_of(info['cycle'][0], kk)})
+                        else:
+                            rows_cy.append({**base,
+                                'Цикл': ' → '.join(fmt(x, kk) for x in info['cycle']),
+                                'Длина': len(info['cycle'])})
+                    for b, n in boxes_kk.items():
+                        rows_box.append({'k': kk, 'Контейнер': b, 'Классов': n,
+                                         'Классов %': round(100 * n / total_kk, 2),
+                                         'В аттракторах': 'да' if b in att_kk else 'нет'})
+                df_all_fp = pd.DataFrame(rows_fp)
+                df_all_cy = pd.DataFrame(rows_cy)
+                df_all_box = pd.DataFrame(rows_box).sort_values(
+                    ['k', 'Классов'], ascending=[True, False])
+
+            styler_all = df_all_box.style.apply(
+                lambda row: (['background-color: #e6f4ea;'] * len(row)
+                             if row['В аттракторах'] == 'да' else [''] * len(row)),
+                axis=1).hide()
+            st.dataframe(styler_all, use_container_width=True)
+
+            buf2 = io.BytesIO()
+            try:
+                with pd.ExcelWriter(buf2, engine='openpyxl') as w2:
+                    df_all_fp.to_excel(w2, sheet_name='Fixed points', index=False)
+                    df_all_cy.to_excel(w2, sheet_name='Cycles', index=False)
+                    df_all_box.to_excel(w2, sheet_name='Containers', index=False)
+                    _paint_yes(w2, 'Containers', 'В аттракторах')
+                st.download_button(
+                    "Скачать Excel (все k, 1–12)", buf2.getvalue(),
+                    "kaprekar_all_k_1_12.xlsx",
+                    "application/vnd.openxmlformats-officedocument."
+                    "spreadsheetml.sheet", key='exp_all_xlsx')
+            except Exception:
+                st.download_button(
+                    "Скачать CSV (все k)",
+                    pd.concat([df_all_fp.assign(sheet='fixed'),
+                               df_all_cy.assign(sheet='cycles'),
+                               df_all_box.assign(sheet='containers')])
+                    .to_csv(index=False, sep=';').encode('utf-8-sig'),
+                    "kaprekar_all_k_1_12.csv", "text/csv", key='exp_all_csv')
 
 st.divider()
