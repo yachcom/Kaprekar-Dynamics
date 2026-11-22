@@ -860,7 +860,7 @@ with tabs[7]:
         with c_cy:
             st.subheader("Циклы длины > 1")
             st.dataframe(df_cy, use_container_width=True, hide_index=True)
-        st.subheader("Самые частые контейнеры (топ-15 по классам)")
+        st.subheader("Самые частые контейнеры")
         st.caption("Зелёные строки — контейнер встречается в элементах аттракторов.")
         styler = df_box.style.apply(
             lambda row: (['background-color: #e6f4ea;'] * len(row)
