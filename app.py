@@ -779,4 +779,109 @@ with tabs[6]:
         n_ok = sum(1 for _, s, _ in results if s == '✅')
         st.metric(f"Пройдено {n_ok}/{len(results)}", "")
 
+# ===== TAB 8: СВОДКА И EXCEL =====
+with tabs[7]:
+    import io
+    from collections import Counter
+
+    st.header("Сводка: неподвижные точки, циклы, контейнеры")
+    st.caption("Полный перебор классов; кэш общий с вкладкой «Перепись» — "
+               "если k уже загружен там, здесь откроется мгновенно.")
+
+    k_exp = st.selectbox("k:", list(range(1, 13)), index=7, key='k_exp')
+
+    cycles_exp = None
+    if k_exp <= 9:
+        cycles_exp = enumerate_classes_cached(k_exp)
+    else:
+        est = comb(k_exp + 9, 9)
+        st.warning(f"k={k_exp}: {est:,} классов. Первый запуск может занять "
+                   f"несколько минут; результат кэшируется.")
+        if st.button(f"Загрузить k={k_exp}", key=f'exp_load_{k_exp}'):
+            st.session_state[f'exp_loaded_{k_exp}'] = True
+            st.rerun()
+        if st.session_state.get(f'exp_loaded_{k_exp}'):
+            cycles_exp = enumerate_classes_cached(k_exp)
+
+    if cycles_exp is not None:
+        d_basins_exp = d_basins_cached(k_exp)
+        total_c = sum(i['count'] for i in cycles_exp.values())
+
+        df_fp = pd.DataFrame([
+            {'Неподвижная точка': fmt(info['cycle'][0], k_exp),
+             'z': z_of(info['cycle'][0], k_exp),
+             'Классов': info['count'],
+             'd-сост.': d_basins_exp.get(canon, 0),
+             'Чисел': info['numbers']}
+            for canon, info in sorted(cycles_exp.items(),
+                                      key=lambda kv: -kv[1]['count'])
+            if len(info['cycle']) == 1
+        ])
+
+        df_cy = pd.DataFrame([
+            {'Цикл': ' → '.join(fmt(x, k_exp) for x in info['cycle']),
+             'Длина': len(info['cycle']),
+             'Содержит 86__32': 'да' if any(
+                 fmt(x, k_exp)[:2] + '__' + fmt(x, k_exp)[-2:] == '86__32'
+                 for x in info['cycle']) else 'нет',
+             'Классов': info['count'],
+             'd-сост.': d_basins_exp.get(canon, 0),
+             'Чисел': info['numbers']}
+            for canon, info in sorted(cycles_exp.items(),
+                                      key=lambda kv: -kv[1]['count'])
+            if len(info['cycle']) > 1
+        ])
+
+        att_boxes = {fmt(x, k_exp)[:2] + '__' + fmt(x, k_exp)[-2:]
+                     for info in cycles_exp.values() for x in info['cycle']}
+
+        @st.cache_data(show_spinner="Считаю контейнеры…")
+        def _exp_containers(kk):
+            cnt = Counter()
+            for combo in combinations_with_replacement(range(10), kk):
+                s = tuple(sorted(combo, reverse=True))
+                dd = tuple(s[i] - s[kk - 1 - i] for i in range(kk // 2))
+                c = fmt(encode_K(dd, kk), kk)
+                cnt[c[:2] + '__' + c[-2:]] += 1
+            return dict(cnt)
+
+        boxes = _exp_containers(k_exp)
+        df_box = pd.DataFrame([
+            {'Контейнер': b, 'Классов': n,
+             'Классов %': f"{n/total_c*100:.2f}",
+             'В аттракторах': 'да' if b in att_boxes else 'нет'}
+            for b, n in sorted(boxes.items(), key=lambda x: -x[1])[:15]
+        ])
+
+        c_fp, c_cy = st.columns(2)
+        with c_fp:
+            st.subheader("Неподвижные точки")
+            st.dataframe(df_fp, use_container_width=True, hide_index=True)
+        with c_cy:
+            st.subheader("Циклы длины > 1")
+            st.dataframe(df_cy, use_container_width=True, hide_index=True)
+        st.subheader("Самые частые контейнеры (топ-15 по классам)")
+        st.dataframe(df_box, use_container_width=True, hide_index=True)
+
+        buf = io.BytesIO()
+        try:
+            with pd.ExcelWriter(buf, engine='openpyxl') as w:
+                df_fp.to_excel(w, sheet_name='Fixed points', index=False)
+                df_cy.to_excel(w, sheet_name='Cycles', index=False)
+                df_box.to_excel(w, sheet_name='Containers', index=False)
+            st.download_button(
+                "Скачать Excel", buf.getvalue(),
+                f"kaprekar_summary_k{k_exp}.xlsx",
+                "application/vnd.openxmlformats-officedocument."
+                "spreadsheetml.sheet", key=f'exp_xlsx_{k_exp}')
+        except Exception:
+            csv_all = pd.concat([df_fp.assign(sheet='fixed'),
+                                 df_cy.assign(sheet='cycles'),
+                                 df_box.assign(sheet='containers')])
+            st.download_button(
+                "Скачать CSV (openpyxl недоступен)",
+                csv_all.to_csv(index=False).encode('utf-8'),
+                f"kaprekar_summary_k{k_exp}.csv", "text/csv",
+                key=f'exp_csv_{k_exp}')
+
 st.divider()
